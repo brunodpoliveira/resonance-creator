@@ -37,4 +37,6 @@ The particle layout changes how they reach the lines: **Spiral** dots move freel
 
 **Sound:** *Tone* plays the plate's resonant frequency f = f₀·√(n² + m²). Load an audio file or use the mic to make the pattern react to bass, mids and highs. Beats are found by onset detection on the kick-drum band against an adaptive threshold (tempo is shown in the top-left readout); each beat pushes the waves forward, scatters the particles and lets them settle again. Options let the pitch choose the mode, or the mode jump every 1–16 beats. *Strobe on beat* produces flashing light; leave it off around anyone with photosensitive epilepsy.
 
+**Colour:** six built-in palettes, or pick your own three-colour gradient (center, middle, edge). *Spread colour by* maps the gradient by distance from the center, by angle (alternating petals that turn with the pattern), or as bands flowing outward.
+
 **Output:** snapshot (PNG) and record (WebM video with sound). Settings are remembered in your browser.

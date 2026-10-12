@@ -73,6 +73,16 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
 .chip{position:relative;height:30px;border-radius:6px;border:1px solid var(--line-strong);cursor:pointer;padding:0;font:500 10px var(--f-mono);letter-spacing:.06em;color:#fff;text-shadow:0 1px 3px #000;justify-content:center;}
 .chip.on{outline:2px solid var(--fg);outline-offset:1px;}
+.custom{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:8px 10px;padding:8px;border:1px solid var(--line-strong);border-radius:8px;}
+.custom.on{outline:2px solid var(--fg);outline-offset:1px;}
+.custom .lbl{font-size:12px;}
+.custom .bar{height:10px;border-radius:5px;}
+.stops{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.stop{display:flex;flex-direction:column;align-items:center;gap:4px;font:400 10px var(--f-mono);color:var(--muted);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;}
+.stop input[type=color]{-webkit-appearance:none;appearance:none;width:100%;height:30px;border:1px solid var(--line-strong);border-radius:6px;background:none;padding:0;cursor:pointer;}
+.stop input[type=color]::-webkit-color-swatch-wrapper{padding:2px;}
+.stop input[type=color]::-webkit-color-swatch{border:0;border-radius:4px;}
+.stop input[type=color]::-moz-color-swatch{border:0;border-radius:4px;}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}
 .note{font-size:11.5px;color:var(--muted);line-height:1.45;margin:0;}
 .note.warn{color:var(--warn);}
@@ -154,6 +164,16 @@ body.clean .rack{transform:translateX(calc(100% + 24px));opacity:0;pointer-event
     <section class="grp">
       <div class="grp-h"><span>Light</span></div>
       <div class="chips" id="palettes"></div>
+      <div class="custom" id="customBox">
+        <span class="lbl">Your gradient</span><div class="bar" id="customBar"></div>
+        <div class="stops">
+          <label class="stop">Center<input type="color" id="cc0"></label>
+          <label class="stop">Middle<input type="color" id="cc1"></label>
+          <label class="stop">Edge<input type="color" id="cc2"></label>
+        </div>
+      </div>
+      <div class="grp-h"><span>Spread colour by</span></div>
+      <div class="seg three" id="colorBy"></div>
       <div id="lightCtl"></div>
     </section>
 
@@ -212,7 +232,7 @@ const PALETTES = {
 const DEF = {
   mode: 0, n: 3, m: 5, variant: 0, fold: 6, foldOn: 1, fzoom: 1, spin: 0.04, level: 0, sources: 6, wspeed: 1, motion: 1, depth: 0.5,
   count: 36000, lattice: 0, settle: 0.3, width: 2.6, ghost: 0.03, dot: 0.9, shake: 0,
-  palette: 'bloodmoon', hue: 0, glow: 0.55, chroma: 0.005, trails: 0.7, tzoom: 1.006, twist: 0, expo: 1.1,
+  palette: 'bloodmoon', custom: ['#1f56e0', '#38d6cf', '#ff6f86'], colorBy: 0, hue: 0, glow: 0.55, chroma: 0.005, trails: 0.7, tzoom: 1.006, twist: 0, expo: 1.1,
   react: 1, sens: 0.5, jumpEvery: 4, hold: 9, toneBase: 110, scale: 0.92, res: 1, grain: 0.025,
   autopilot: 1, pitchMode: 0, beatJump: 0, strobe: 0,
 };
@@ -231,6 +251,8 @@ const PRESETS = {
 const qs0 = new URLSearchParams(location.search);
 let P = Object.assign({}, DEF);
 try { const s = qs0.has('fresh') ? null : JSON.parse(localStorage.getItem('resonance-creator') || 'null'); if (s && typeof s === 'object') for (const k in DEF) if (k in s) P[k] = s[k]; } catch (e) {}
+if (!Array.isArray(P.custom) || P.custom.length !== 3 || !P.custom.every(c => /^#[0-9a-f]{6}$/i.test(c))) P.custom = DEF.custom.slice();
+if (P.palette === 'custom') {} else if (!PALETTES[P.palette]) P.palette = DEF.palette;
 if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { P.strobe = 0; P.hold = Math.max(P.hold, 16); P.spin = Math.min(P.spin, 0.02); }
 P.strobe = 0; // never start strobing on load
 let countTouched = false;
@@ -318,6 +340,7 @@ ${FIELD_GLSL}
 uniform float uCount, uLattice, uCell, uSettle, uWidth, uGhost, uPtPx, uShake, uTime, uFade, uHue, uBreath;
 uniform vec2 uScaleXY, uOffset;
 uniform vec3 uC0, uC1, uC2;
+uniform float uColorBy;
 out vec3 vCol; out float vI;
 float hash(float n){ return fract(sin(n*12.9898 + 78.233) * 43758.5453); }
 vec2 basePos(float i){
@@ -386,7 +409,16 @@ void main(){
   float I = exp(-pow(d / (uCell * uWidth), 2.));
   I = max(I, uGhost);
   float g = G(p);
-  float t = clamp(length(p) * .85 + (hash(i * 3.1) - .5) * .35 + sign(g) * .12, 0., 1.);
+  float cj = (hash(i * 3.1) - .5);
+  float t;
+  if(uColorBy < .5){            // radius: center → edge
+    t = clamp(length(p) * .85 + cj * .35 + sign(g) * .12, 0., 1.);
+  } else if(uColorBy < 1.5){    // angle: petals alternate colours, turning with the pattern
+    float k = uFoldOn > .5 ? max(uFold, 1.) : 6.;
+    t = clamp(.5 + .5 * cos((atan(p.y, p.x) - uRot) * k) + cj * .15, 0., 1.);
+  } else {                      // bands: rings of colour flowing outward
+    t = clamp(abs(fract(length(p) * 2.2 - uPhase * .04) * 2. - 1.) + cj * .12, 0., 1.);
+  }
   vec3 col = t < .5 ? mix(uC0, uC1, t * 2.) : mix(uC1, uC2, (t - .5) * 2.);
   vCol = hueRot(col, uHue);
   vI = I * uFade;
@@ -804,8 +836,9 @@ function frame(nowMs) {
   const sx = scale * minWH / W, sy = scale * minWH / Hh;
   gl.uniform2f(u.uScaleXY, sx, sy);
   gl.uniform2f(u.uOffset, 0, S.sheet);
-  const pal = PALETTES[P.palette] || PALETTES.abyss;
-  [u.uC0, u.uC1, u.uC2].forEach((loc, i) => { const c = hex(pal.c[i]); gl.uniform3f(loc, c[0], c[1], c[2]); });
+  const palC = P.palette === 'custom' ? P.custom : (PALETTES[P.palette] || PALETTES.abyss).c;
+  [u.uC0, u.uC1, u.uC2].forEach((loc, i) => { const c = hex(palC[i]); gl.uniform3f(loc, c[0], c[1], c[2]); });
+  gl.uniform1f(u.uColorBy, P.colorBy);
   // keep total energy roughly constant across particle counts & sizes
   const trailNorm = clamp(Math.pow((1 - P.trails) / 0.3, 0.8), 0.3, 1.4);
   const gain = 0.22 * Math.sqrt(36000 / N) / Math.max(0.6, P.dot * P.dot) * trailNorm;
@@ -974,18 +1007,26 @@ const MOTION_STEPS = [0, 0.4, 1, 2.2];
 let lastMotion = 1;
 buildSeg('motionSeg', ['Still', 'Slow', 'Flow', 'Fast'], (i) => { if (P.motion > 0) lastMotion = P.motion; P.motion = MOTION_STEPS[i]; syncUI(); save(); });
 buildSeg('lattices', LATTICES, (i) => { P.lattice = i; syncUI(); save(); });
+buildSeg('colorBy', ['Radius', 'Angle', 'Bands'], (i) => { P.colorBy = i; syncUI(); save(); });
+['cc0', 'cc1', 'cc2'].forEach((id, i) => {
+  $(id).addEventListener('input', (e) => {
+    const base = P.palette === 'custom' ? P.custom : (PALETTES[P.palette] || PALETTES.abyss).c;
+    const next = base.slice(); next[i] = e.target.value;
+    P.custom = next; P.palette = 'custom'; syncUI(); save();
+  });
+});
 buildSeg('presets', Object.keys(PRESETS), (i) => applyPreset(Object.keys(PRESETS)[i]));
 const palHost = $('palettes');
 for (const key in PALETTES) {
   const p = PALETTES[key]; const b = document.createElement('button');
   b.className = 'chip'; b.textContent = p.name; b.dataset.k = key; b.setAttribute('aria-label', 'Palette ' + p.name);
   b.style.background = `linear-gradient(90deg, ${p.c[0]}, ${p.c[1]} 55%, ${p.c[2]})`;
-  b.addEventListener('click', () => { P.palette = key; syncUI(); save(); });
+  b.addEventListener('click', () => { P.palette = key; P.custom = p.c.slice(); syncUI(); save(); });
   palHost.appendChild(b);
 }
 function applyPreset(name) {
   const pr = PRESETS[name];
-  const base = { variant: 0, twist: 0, spin: DEF.spin, ghost: DEF.ghost, shake: 0, level: 0, sources: 6, hue: 0, motion: 1, depth: 0.5, wspeed: 1, expo: DEF.expo };
+  const base = { variant: 0, twist: 0, spin: DEF.spin, ghost: DEF.ghost, shake: 0, level: 0, sources: 6, hue: 0, motion: 1, depth: 0.5, wspeed: 1, expo: DEF.expo, colorBy: 0 };
   const prev = P.mode;
   Object.assign(P, base, pr);
   P.mode = prev; setMode(pr.mode);
@@ -1010,6 +1051,11 @@ function syncUI() {
   [...$('motionSeg').children].forEach((b, i) => b.classList.toggle('on', Math.abs(P.motion - MOTION_STEPS[i]) < 0.005));
   $('motionTag').textContent = P.motion === 0 ? 'frozen' : P.motion < 0.7 ? 'drifting' : P.motion < 1.6 ? 'flowing' : 'racing';
   [...palHost.children].forEach(b => b.classList.toggle('on', b.dataset.k === P.palette));
+  const cur = P.palette === 'custom' ? P.custom : (PALETTES[P.palette] || PALETTES.abyss).c;
+  ['cc0', 'cc1', 'cc2'].forEach((id, i) => { if (document.activeElement !== $(id)) $(id).value = cur[i]; });
+  $('customBar').style.background = `linear-gradient(90deg, ${cur[0]}, ${cur[1]} 50%, ${cur[2]})`;
+  $('customBox').classList.toggle('on', P.palette === 'custom');
+  [...$('colorBy').children].forEach((b, i) => b.classList.toggle('on', i === P.colorBy));
   $('fieldTag').textContent = MODES[pendingMode ?? P.mode].tag;
   $('btnAuto').classList.toggle('on', !!P.autopilot);
   const tg = (id, v) => { $(id).textContent = v ? 'on' : 'off'; $(id).classList.toggle('on', !!v); };
