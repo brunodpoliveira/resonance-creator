@@ -20,6 +20,8 @@ Needs a browser with WebGL2: current Chrome, Edge, Firefox or Safari.
 
 Particles move toward ψ = 0 (or |ψ| = contour level) by Newton steps along the gradient. A polar fold gives the kaleidoscope symmetry.
 
+The particle layout changes how they reach the lines: **Spiral** dots move freely and draw smooth lines; **Rings** dots can only slide around their own circle, so the pattern is drawn as dashes along concentric rings; **Grid** dots can only slide along their own row, giving a scanline look.
+
 ## Controls
 | Key | Action |
 |---|---|
