@@ -33,6 +33,6 @@ Particles move toward ψ = 0 (or |ψ| = contour level) by Newton steps along the
 | [ ] | Slower / faster |
 | P | Save a PNG snapshot |
 
-**Sound:** *Tone* plays the plate's resonant frequency f = f₀·√(n² + m²). Load an audio file or use the mic to make the pattern react to bass, mids and highs. Options let the pitch choose the mode or beats jump it. *Strobe on beat* produces flashing light; leave it off around anyone with photosensitive epilepsy.
+**Sound:** *Tone* plays the plate's resonant frequency f = f₀·√(n² + m²). Load an audio file or use the mic to make the pattern react to bass, mids and highs. Beats are found by onset detection on the kick-drum band against an adaptive threshold (tempo is shown in the top-left readout); each beat pushes the waves forward, scatters the particles and lets them settle again. Options let the pitch choose the mode, or the mode jump every 1–16 beats. *Strobe on beat* produces flashing light; leave it off around anyone with photosensitive epilepsy.
 
 **Output:** snapshot (PNG) and record (WebM video with sound). Settings are remembered in your browser.

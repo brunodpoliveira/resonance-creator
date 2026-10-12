@@ -34,7 +34,7 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;background
 .hud .row{display:flex;gap:14px;flex-wrap:wrap;font-variant-numeric:tabular-nums;}
 .hud b{color:var(--fg);font-weight:400;}
 
-.rack{position:fixed;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);width:304px;display:flex;flex-direction:column;background:var(--panel);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;}
+.rack{position:fixed;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);width:304px;display:flex;flex-direction:column;background:var(--panel);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border:1px solid var(--line);border-radius:10px;overflow:hidden;overflow:clip;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;}
 .rack.closed{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none;}
 .rack-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);}
 .rack-head h1{margin:0;font-size:12px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;}
@@ -52,7 +52,8 @@ button:focus-visible,.filebtn:focus-within,input:focus-visible,select:focus-visi
 button.on{background:rgba(127,227,255,.16);border-color:var(--accent);color:var(--accent);}
 button.rec.on{background:rgba(255,107,139,.18);border-color:var(--hot);color:var(--hot);}
 button.icon{padding:6px 8px;font-family:var(--f-mono);font-size:11px;}
-.filebtn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+.filebtn{position:relative;overflow:hidden;}
+.filebtn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:0;}
 
 .seg{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;}
 .seg.three{grid-template-columns:repeat(3,1fr);}
@@ -212,7 +213,7 @@ const DEF = {
   mode: 0, n: 3, m: 5, variant: 0, fold: 6, foldOn: 1, fzoom: 1, spin: 0.04, level: 0, sources: 6, wspeed: 1, motion: 1, depth: 0.5,
   count: 36000, lattice: 0, settle: 0.3, width: 2.6, ghost: 0.03, dot: 0.9, shake: 0,
   palette: 'bloodmoon', hue: 0, glow: 0.55, chroma: 0.005, trails: 0.7, tzoom: 1.006, twist: 0, expo: 1.1,
-  react: 1, hold: 9, toneBase: 110, scale: 0.92, res: 1, grain: 0.025,
+  react: 1, sens: 0.5, jumpEvery: 4, hold: 9, toneBase: 110, scale: 0.92, res: 1, grain: 0.025,
   autopilot: 1, pitchMode: 0, beatJump: 0, strobe: 0,
 };
 const PRESETS = {
@@ -499,12 +500,12 @@ window.addEventListener('resize', resize);
 
 /* ---------------- audio ---------------- */
 const A = { ctx: null, analyser: null, data: null, master: null, recDest: null, toneOsc: null, toneOsc2: null, toneGain: null, el: null, elSrc: null, mic: null, micSrc: null,
-  bass: 0, mid: 0, high: 0, level: 0, bassAvg: 0.05, beat: 0, lastBeat: 0, pitch: 0, pitchHold: 0, active: false };
+  bass: 0, mid: 0, high: 0, level: 0, beat: 0, lastBeat: 0, hit: false, bpm: 0, beatCount: 0, pitch: 0, pitchHold: 0, active: false };
 function ensureAudio() {
   if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
   A.ctx = new AC();
-  A.analyser = A.ctx.createAnalyser(); A.analyser.fftSize = 2048; A.analyser.smoothingTimeConstant = 0.55;
+  A.analyser = A.ctx.createAnalyser(); A.analyser.fftSize = 2048; A.analyser.smoothingTimeConstant = 0;
   A.data = new Uint8Array(A.analyser.frequencyBinCount);
   A.master = A.ctx.createGain(); A.master.connect(A.ctx.destination);
   A.recDest = A.ctx.createMediaStreamDestination(); A.master.connect(A.recDest);
@@ -575,29 +576,93 @@ function updateAudioState() {
 }
 const PAIRS = []; for (let n = 1; n <= 12; n++) for (let m = n + 1; m <= 13; m++) PAIRS.push([n, m, Math.sqrt(n * n + m * m)]);
 function analyse(dt, now) {
-  if (!A.ctx || !A.active) { A.bass *= 0.92; A.mid *= 0.92; A.high *= 0.92; A.beat *= 0.85; return; }
-  A.analyser.getByteFrequencyData(A.data);
-  const hz = A.ctx.sampleRate / A.analyser.fftSize;
-  const band = (lo, hi) => { let s = 0, c = 0; for (let i = Math.max(1, Math.floor(lo / hz)); i <= Math.floor(hi / hz); i++) { s += A.data[i]; c++; } return c ? s / c / 255 : 0; };
-  const b = band(25, 160), m = band(160, 2000), h = band(2000, 10000);
-  const k = 1 - Math.exp(-dt * 18);
-  A.bass = lerp(A.bass, b, k); A.mid = lerp(A.mid, m, k); A.high = lerp(A.high, h, k);
-  A.bassAvg = lerp(A.bassAvg, b, 1 - Math.exp(-dt * 1.5));
-  A.beat *= Math.exp(-dt * 7);
-  if (b > A.bassAvg * 1.3 + 0.04 && b > 0.28 && now - A.lastBeat > 0.28) {
-    A.beat = 1; A.lastBeat = now;
-    if (P.beatJump) { if (Math.random() < 0.5) P.n = clamp(P.n + (Math.random() < .5 ? -1 : 1), 1, 12); else P.m = clamp(P.m + (Math.random() < .5 ? -1 : 1), 1, 13); if (P.n === P.m) P.m++; syncUI(); }
+  const fall = Math.exp(-dt * 4);
+  if (!A.ctx || !A.active) { A.bass *= fall; A.mid *= fall; A.high *= fall; A.beat *= Math.exp(-dt * 6); A.bpm = 0; return; }
+  const bins = A.analyser.frequencyBinCount;
+  if (!A.f || A.f.length !== bins) {
+    A.f = new Float32Array(bins); A.prev = new Float32Array(bins);
+    A.hist = []; A.ivals = []; A.env = { b: [0, 1e-4], m: [0, 1e-4], h: [0, 1e-4] }; A.beatCount = 0;
   }
-  if (P.pitchMode) {
-    let bi = 0, bv = 0;
-    for (let i = Math.floor(60 / hz); i < Math.floor(2200 / hz); i++) if (A.data[i] > bv) { bv = A.data[i]; bi = i; }
-    if (bv > 150) {
-      const f = bi * hz, target = f / P.toneBase;
-      let best = PAIRS[0], bd = 1e9; for (const p of PAIRS) { const d = Math.abs(p[2] - target); if (d < bd) { bd = d; best = p; } }
-      if (now - A.pitchHold > 0.35 && (best[0] !== P.n || best[1] !== P.m) && !A.toneOsc) { P.n = best[0]; P.m = best[1]; A.pitchHold = now; syncUI(); }
+  A.analyser.getFloatFrequencyData(A.f);
+  const hz = A.ctx.sampleRate / A.analyser.fftSize;
+  const top = Math.min(bins - 1, Math.floor(12000 / hz));
+  let kb = 0, kc = 0, mb = 0, mc = 0, hb = 0, hc = 0, kickFlux = 0, wideFlux = 0, loudest = -Infinity, loudBin = 0;
+  for (let i = 1; i <= top; i++) {
+    const db = A.f[i];
+    const mag = db > -160 ? Math.pow(10, db / 20) : 0;
+    const d = mag - A.prev[i]; A.prev[i] = mag;
+    const f = i * hz;
+    if (f < 150) { kb += mag; kc++; if (d > 0) kickFlux += d; }
+    else if (f < 2000) { mb += mag; mc++; if (d > 0) wideFlux += d * 0.5; }
+    else { hb += mag; hc++; if (d > 0) wideFlux += d; }
+    if (f > 60 && f < 2200 && db > loudest) { loudest = db; loudBin = i; }
+  }
+  kb /= kc || 1; mb /= mc || 1; hb /= hc || 1;
+  kickFlux /= kc || 1; wideFlux /= (mc + hc) || 1;
+  // auto-gain: each band is judged against its own recent loudness range,
+  // so a track that is loud all the time still pulses
+  const norm = (e, x) => {
+    e[1] = Math.max(x, e[1] * Math.exp(-dt * 0.35), 1e-5);   // slowly falling peak
+    e[0] = x < e[0] ? x : e[0] + (x - e[0]) * (1 - Math.exp(-dt * 0.25)); // slowly rising floor
+    return clamp((x - e[0]) / (e[1] - e[0] + 1e-6), 0, 1);
+  };
+  const bN = norm(A.env.b, kb), mN = norm(A.env.m, mb), hN = norm(A.env.h, hb);
+  const att = 1 - Math.exp(-dt * 30), rel = 1 - Math.exp(-dt * 5);
+  A.bass = lerp(A.bass, bN, bN > A.bass ? att : rel);
+  A.mid = lerp(A.mid, mN, mN > A.mid ? att : rel);
+  A.high = lerp(A.high, hN, hN > A.high ? att : rel);
+  A.beat *= Math.exp(-dt * 6);
+
+  // onset detection: spectral flux against an adaptive threshold (mean + k·σ of the last ~1.2 s)
+  // energy rise over the last ~40 ms, in log units, so a steady drone scores zero and a kick on top of it scores high
+  const lk = Math.log(kb + 1e-7), lw = Math.log(hb + mb * 0.3 + 1e-7);
+  if (A.ek === undefined) { A.ek = lk; A.ew = lw; }
+  const onset = Math.max(0, lk - A.ek) + 0.08 * Math.min(2, Math.max(0, lw - A.ew));
+  const ea = 1 - Math.exp(-dt / 0.2);
+  A.ek += (lk - A.ek) * ea; A.ew += (lw - A.ew) * ea;
+  const H = A.hist;
+  let mean = 0; for (const v of H) mean += v; mean /= H.length || 1;
+  let vr = 0; for (const v of H) vr += (v - mean) * (v - mean); const sd = Math.sqrt(vr / (H.length || 1));
+  H.push(onset); while (H.length > Math.max(20, Math.round(1.2 / Math.max(dt, 1 / 240)))) H.shift();
+  const kSig = 2.3 - 1.8 * P.sens;
+  const minGap = 0.25;
+  if (onset < mean + 0.5 * sd) A.armed = true; // re-arm only after the previous hit has died down
+  const peakGate = (A.peakAvg || 0) * (0.75 - 0.35 * P.sens); // must be a sizeable fraction of a typical hit
+  if (A.armed && H.length > 15 && onset > mean + kSig * sd && onset > 0.25 && onset > peakGate && now - A.lastBeat > minGap) {
+    const iv = now - A.lastBeat;
+    if (iv > 0.25 && iv < 1.5) { A.ivals.push(iv); if (A.ivals.length > 16) A.ivals.shift(); }
+    A.lastBeat = now; A.beat = 1; A.hit = true; A.beatCount++; A.armed = false;
+    A.peakAvg = A.peakAvg ? lerp(A.peakAvg, onset, 0.15) : onset;
+    if (A.ivals.length >= 4) {
+      const sorted = A.ivals.slice().sort((a, b) => a - b);
+      let bpm = 60 / sorted[sorted.length >> 1];
+      while (bpm < 70) bpm *= 2; while (bpm > 180) bpm /= 2;
+      A.bpm = bpm;
+    }
+    if (P.beatJump && A.beatCount % Math.max(1, Math.round(P.jumpEvery)) === 0) {
+      if (Math.random() < 0.5) P.n = clamp(P.n + (Math.random() < .5 ? -1 : 1), 1, 12); else P.m = clamp(P.m + (Math.random() < .5 ? -1 : 1), 1, 13);
+      if (P.n === P.m) P.m = clamp(P.m + 1, 1, 13);
+      if (Math.random() < 0.2) P.fold = [4, 5, 6, 8, 10, 12][randInt(0, 5)];
+      syncUI();
     }
   }
+  if (now - A.lastBeat > 3) A.bpm = 0;
+  if (A.peakAvg) A.peakAvg *= Math.exp(-dt * 0.15);
+
+  if (P.pitchMode && loudest > -50) {
+    const f = loudBin * hz, target = f / P.toneBase;
+    let best = PAIRS[0], bd = 1e9; for (const p of PAIRS) { const d = Math.abs(p[2] - target); if (d < bd) { bd = d; best = p; } }
+    if (now - A.pitchHold > 0.35 && (best[0] !== P.n || best[1] !== P.m) && !A.toneOsc) { P.n = best[0]; P.m = best[1]; A.pitchHold = now; syncUI(); }
+  }
 }
+
+// listen on its own fast clock so beats are caught even when the picture renders slowly
+let anLast = performance.now();
+setInterval(() => {
+  const t = performance.now();
+  const dt = Math.min(0.1, (t - anLast) / 1000); anLast = t;
+  analyse(dt, t / 1000);
+}, 8);
 
 /* ---------------- autopilot ---------------- */
 let nextPick = 0;
@@ -625,13 +690,14 @@ let fpsT = 0, fpsN = 0, fps = 60, lowFpsSince = 0;
 let wantShot = false;
 const qs = new URLSearchParams(location.search);
 const FREEZE = qs.has('freeze'); // used by automated tests
+const NORENDER = qs.has('norender'); // used by automated tests
 function frame(nowMs) {
+  if (NORENDER) { requestAnimationFrame(frame); return; }
   const now = nowMs / 1000;
   let dt = Math.min(0.1, (nowMs - last) / 1000); last = nowMs;
   if (FREEZE) dt = 1 / 60;
   tAcc += dt;
   resize();
-  analyse(dt, now);
 
   if (P.motion === 0 && P.autopilot) nextPick += dt; // Still holds the current pattern
   if (P.autopilot && tAcc > nextPick) { if (nextPick > 0) randomize(Math.random() < 0.25); nextPick = tAcc + P.hold * rand(0.8, 1.25); }
@@ -652,8 +718,14 @@ function frame(nowMs) {
   S.hue = lerp(S.hue, P.hue, k);
   const mv = P.motion;
   S.mt = (S.mt || 0) + dt * mv * (1 + midDrift);
-  S.rot += dt * P.spin * mv * (1 + A.high * P.react);
-  S.phase += dt * P.wspeed * mv * (1 + midDrift * 2);
+  if (A.hit) { // each beat gives the waves and the rotation a push that eases out
+    A.hit = false;
+    S.pv = (S.pv || 0) + 5 * P.react;
+    S.rv = (S.rv || 0) + (A.beatCount % 2 ? 1 : -1) * 0.35 * P.react;
+  }
+  S.pv = (S.pv || 0) * Math.exp(-dt * 5); S.rv = (S.rv || 0) * Math.exp(-dt * 4);
+  S.rot += dt * (P.spin * mv * (1 + A.high * P.react) + S.rv);
+  S.phase += dt * (P.wspeed * mv * (1 + midDrift * 2) + S.pv);
   // slow wander of the mode numbers so the pattern keeps morphing
   const dp = P.depth, mt = S.mt;
   S.nE = Math.max(0.5, S.n + dp * 0.6 * Math.sin(mt * 0.23) + dp * 0.25 * Math.sin(mt * 0.61 + 2.1));
@@ -675,7 +747,7 @@ function frame(nowMs) {
   S.sheet = lerp(S.sheet || 0, sheetFrac, 1 - Math.exp(-dt * 6));
   const visH = Hh * (1 - S.sheet);
   const minWH = Math.min(W, visH);
-  const scale = P.scale * (1 + beat * 0.03);
+  const scale = P.scale * (1 + beat * 0.05 + bass * 0.02);
   const ppu = scale * minWH / 2;
   const ptPx = clamp(cell * ppu * 1.15 * P.dot * (1 + bass * 0.5), 1, PT_RANGE[1]);
 
@@ -690,7 +762,7 @@ function frame(nowMs) {
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.tex);
   gl.uniform1i(progFeed.u.uPrev, 0);
   gl.uniform1f(progFeed.u.uDecay, P.trails * (pendingMode !== null ? 0.9 : 1));
-  gl.uniform1f(progFeed.u.uFZ, P.tzoom + bass * 0.01);
+  gl.uniform1f(progFeed.u.uFZ, P.tzoom + beat * 0.025 + bass * 0.004);
   gl.uniform1f(progFeed.u.uFR, P.twist);
   gl.uniform1f(progFeed.u.uAspect, W / Hh);
   gl.uniform1f(progFeed.u.uFBlur, 0.6 + P.trails * 0.8);
@@ -707,11 +779,11 @@ function frame(nowMs) {
   gl.uniform1f(u.uFZoom, S.zE); gl.uniform1f(u.uRot, S.rot); gl.uniform1f(u.uLevel, S.lE);
   gl.uniform1f(u.uSrc, Math.max(2, Math.round(S.sources))); gl.uniform1f(u.uPhase, S.phase);
   gl.uniform1f(u.uCount, N); gl.uniform1f(u.uLattice, P.lattice); gl.uniform1f(u.uCell, cell);
-  gl.uniform1f(u.uSettle, clamp(P.settle * (1 - bass * 0.55), 0, 1));
-  gl.uniform1f(u.uWidth, P.width * (1 + bass * 0.6)); gl.uniform1f(u.uGhost, P.ghost);
-  gl.uniform1f(u.uPtPx, ptPx); gl.uniform1f(u.uShake, P.shake + bass * 0.35 + beat * 0.25);
+  gl.uniform1f(u.uSettle, clamp(P.settle * (1 - Math.min(beat, 1) * 0.7), 0, 1));
+  gl.uniform1f(u.uWidth, P.width * (1 + bass * 0.5)); gl.uniform1f(u.uGhost, P.ghost);
+  gl.uniform1f(u.uPtPx, ptPx); gl.uniform1f(u.uShake, P.shake + beat * 0.3 + A.high * R * 0.08);
   gl.uniform1f(u.uTime, tAcc); gl.uniform1f(u.uFade, S.fade); gl.uniform1f(u.uHue, S.hue + A.mid * R * 0.05);
-  gl.uniform1f(u.uBreath, Math.sin(S.mt * 0.7) * P.depth + bass);
+  gl.uniform1f(u.uBreath, Math.sin(S.mt * 0.7) * P.depth + bass * 0.6 + beat * 0.6);
   const sx = scale * minWH / W, sy = scale * minWH / Hh;
   gl.uniform2f(u.uScaleXY, sx, sy);
   gl.uniform2f(u.uOffset, 0, S.sheet);
@@ -733,8 +805,8 @@ function frame(nowMs) {
   gl.useProgram(progComp.p);
   const c = progComp.u;
   gl.uniform1i(c.uTex, 0);
-  gl.uniform1f(c.uChroma, P.chroma * (1 + A.high * R * 2 + beat * 1.5));
-  gl.uniform1f(c.uGlow, P.glow * (1 + bass * 0.6));
+  gl.uniform1f(c.uChroma, P.chroma * (1 + A.high * R * 1.5 + beat * 2));
+  gl.uniform1f(c.uGlow, P.glow * (1 + bass * 0.4 + beat * 0.8));
   gl.uniform1f(c.uExpo, P.expo); gl.uniform1f(c.uFlash, flash);
   gl.uniform1f(c.uTime, tAcc); gl.uniform1f(c.uGrain, P.grain); gl.uniform1f(c.uAspect, W / Hh);
   gl.uniform2f(c.uRes, W, Hh);
@@ -770,7 +842,7 @@ function updateHUD() {
   $('hudFold').textContent = P.foldOn ? String(Math.round(S.fold)) : 'off';
   $('hudCount').textContent = (P.count / 1000).toFixed(0) + 'k';
   $('hudFps').textContent = fps.toFixed(0);
-  $('hudAudio').textContent = A.active ? 'bass ' + (A.bass * 100).toFixed(0) + ' · mid ' + (A.mid * 100).toFixed(0) : '';
+  $('hudAudio').textContent = A.active ? (A.bpm ? Math.round(A.bpm) + ' bpm' : 'listening') + ' · beat ' + (A.beat > 0.4 ? '●' : '○') + ' · bass ' + (A.bass * 100).toFixed(0) : '';
 }
 
 /* ---------------- saving files ---------------- */
@@ -846,6 +918,8 @@ const CTRL = {
   soundCtl: [
     { k: 'toneBase', label: 'Base frequency f₀', min: 40, max: 440, step: 1, fmt: v => v + ' Hz' },
     { k: 'react', label: 'Reactivity', min: 0, max: 3, step: 0.01 },
+    { k: 'sens', label: 'Beat sensitivity', min: 0, max: 1, step: 0.01 },
+    { k: 'jumpEvery', label: 'Jump the mode every', min: 1, max: 16, step: 1, fmt: v => v + (+v === 1 ? ' beat' : ' beats') },
   ],
   outCtl: [
     { k: 'hold', label: 'Autopilot hold', min: 3, max: 40, step: 1, fmt: v => v + ' s' },
@@ -944,7 +1018,7 @@ $('btnShot').onclick = () => { wantShot = true; };
 $('btnRec').onclick = toggleRec;
 $('btnTone').onclick = () => setTone(!A.toneOsc);
 $('btnMic').onclick = toggleMic;
-$('fileIn').onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) loadFile(f); e.target.value = ''; };
+$('fileIn').onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) loadFile(f); e.target.value = ''; e.target.blur(); rack.scrollTop = 0; };
 $('btnPlay').onclick = () => { if (!A.el) return; ensureAudio(); if (A.el.paused) A.el.play(); else A.el.pause(); };
 $('tgPitch').onclick = () => { P.pitchMode = P.pitchMode ? 0 : 1; if (P.pitchMode) P.autopilot = 0; syncUI(); save(); };
 $('tgBeat').onclick = () => { P.beatJump = P.beatJump ? 0 : 1; syncUI(); save(); };
@@ -997,7 +1071,7 @@ async function wake() { try { if (navigator.wakeLock && document.visibilityState
 document.addEventListener('visibilitychange', wake); wake();
 
 // test hook
-window.RC = { P, S, set(o) { Object.assign(P, o); if ('mode' in o) { pendingMode = null; S.fade = 1; } for (const k of ['n','m','variant','fold','fzoom','level','sources','hue']) if (k in o) S[k] = o[k]; syncUI(); }, fps: () => fps };
+window.RC = { P, S, A, set(o) { Object.assign(P, o); if ('mode' in o) { pendingMode = null; S.fade = 1; } for (const k of ['n','m','variant','fold','fzoom','level','sources','hue']) if (k in o) S[k] = o[k]; syncUI(); }, fps: () => fps };
 
 syncUI();
 resize();
